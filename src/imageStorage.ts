@@ -47,6 +47,9 @@ function parseDataUrl(dataUrl: string): {
 
 	// Decode base64 to buffer
 	try {
+		if (!base64Data || base64Data.length === 0)
+			throw new Error("Invalid base64 data: empty string");
+		if (!format) throw new Error("Invalid format: empty string");
 		const data = Buffer.from(base64Data, "base64");
 		return { format, data };
 	} catch (error) {
@@ -70,9 +73,7 @@ async function ensureDirectory(dirPath: string): Promise<void> {
  * Saves to both project root (for testing) and specified folder
  * Returns array of file paths where image was saved
  */
-export async function saveImage(
-	options: SaveImageOptions,
-): Promise<string[]> {
+export async function saveImage(options: SaveImageOptions): Promise<string[]> {
 	const { base64DataUrl, folderPath, prompt } = options;
 
 	// Validate folder path is absolute

@@ -1,5 +1,5 @@
-import { imageBridge } from "./imageRequestBridge";
 import type { ServerWebSocket } from "bun";
+import { imageBridge } from "./imageRequestBridge";
 
 // Track connected WebSocket clients
 const clients = new Set<ServerWebSocket>();
@@ -14,7 +14,7 @@ const server = Bun.serve({
 		return new Response("Upgrade failed", { status: 500 });
 	},
 	websocket: {
-		message(ws, message) {
+		message(_ws, message) {
 			try {
 				// Parse message as JSON
 				const data = JSON.parse(message.toString());
@@ -26,9 +26,7 @@ const server = Bun.serve({
 				if (data.type === "imageResponse") {
 					imageBridge.handleImageResponse(data);
 				} else {
-					console.error(
-						`[WebSocket] Unknown message type: ${data.type}`,
-					);
+					console.error(`[WebSocket] Unknown message type: ${data.type}`);
 				}
 			} catch (error) {
 				console.error(`[WebSocket] Failed to parse message: ${error}`);
@@ -46,17 +44,13 @@ const server = Bun.serve({
 			);
 		},
 
-		close(ws, code, message) {
+		close(ws, code) {
 			// Remove client from tracking set
 			clients.delete(ws);
 			imageBridge.removeWebSocketConnection(ws);
 			console.error(
 				`[WebSocket] Client disconnected (code: ${code}). Total clients: ${clients.size}`,
 			);
-		},
-
-		drain(ws) {
-			// the socket is ready to receive more data
 		},
 	},
 });

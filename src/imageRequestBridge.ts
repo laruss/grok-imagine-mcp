@@ -33,8 +33,10 @@ interface PendingRequest {
 class ImageRequestBridge extends EventEmitter {
 	private pendingRequests: Map<string, PendingRequest> = new Map();
 	private wsConnections: Set<ServerWebSocket> = new Set();
-	private readonly REQUEST_TIMEOUT =
-		Number.parseInt(process.env.IMAGE_REQUEST_TIMEOUT || "60000", 10);
+	private readonly REQUEST_TIMEOUT = Number.parseInt(
+		process.env.IMAGE_REQUEST_TIMEOUT || "60000",
+		10,
+	);
 
 	/**
 	 * Register a WebSocket connection
@@ -106,9 +108,7 @@ class ImageRequestBridge extends EventEmitter {
 			const timeout = setTimeout(() => {
 				this.pendingRequests.delete(requestId);
 				reject(
-					new Error(
-						`Image request timed out after ${this.REQUEST_TIMEOUT}ms`,
-					),
+					new Error(`Image request timed out after ${this.REQUEST_TIMEOUT}ms`),
 				);
 			}, this.REQUEST_TIMEOUT);
 
@@ -184,7 +184,7 @@ class ImageRequestBridge extends EventEmitter {
 	 * Clear all pending requests (useful for cleanup)
 	 */
 	clearPendingRequests(): void {
-		for (const [requestId, pending] of this.pendingRequests.entries()) {
+		for (const [_, pending] of this.pendingRequests.entries()) {
 			clearTimeout(pending.timeout);
 			pending.reject(new Error("Bridge shutting down"));
 		}

@@ -21,7 +21,7 @@
 		"noUnusedLocals": false,
 		"noUnusedParameters": false,
 		"noPropertyAccessFromIndexSignature": false,
-        "types": ["bun-types"]
-    },
-    "exclude": ["node_modules", "extension"]
+		"types": ["bun-types"]
+	},
+	"exclude": ["node_modules", "extension"]
 }

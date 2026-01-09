@@ -5,7 +5,12 @@
     "build": "bun run config/build.ts",
     "dev": "bun run config/watch.ts --dir=src,public",
     "pack": "bun run config/pack.ts",
-    "css": "postcss"
+    "css": "postcss",
+    "lint": "bunx biome lint",
+      "format": "bunx biome format",
+      "check": "bunx biome check",
+      "typecheck": "tsc --noEmit",
+      "fix": "bun run lint --fix && bun run format --fix && bun run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "1.8.3",

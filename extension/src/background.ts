@@ -12,17 +12,17 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 import type { ContentScriptResponseType } from "src/types.ts";
 
 let ws: WebSocket | null = null;
-let wsStatus: 'connected' | 'disconnected' | 'connecting' = 'disconnected';
+let wsStatus: "connected" | "disconnected" | "connecting" = "disconnected";
 
 function connectWebSocket() {
 	if (ws && ws.readyState === WebSocket.OPEN) return;
 
-	wsStatus = 'connecting';
+	wsStatus = "connecting";
 	ws = new WebSocket("ws://localhost:3000");
 
 	ws.onopen = () => {
 		console.log("WebSocket connected");
-		wsStatus = 'connected';
+		wsStatus = "connected";
 	};
 
 	ws.onmessage = (event) => {
@@ -46,14 +46,14 @@ function connectWebSocket() {
 
 	ws.onclose = (event) => {
 		console.log("WebSocket closed:", event.reason);
-		wsStatus = 'disconnected';
+		wsStatus = "disconnected";
 		// Reconnect logic if needed
 		setTimeout(connectWebSocket, 5000);
 	};
 
 	ws.onerror = (error) => {
 		console.error("WebSocket error:", error);
-		wsStatus = 'disconnected';
+		wsStatus = "disconnected";
 	};
 }
 

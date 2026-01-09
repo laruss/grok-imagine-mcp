@@ -6,6 +6,7 @@
 		"useIgnoreFile": true
 	},
 	"files": {
+		"includes": ["**", "!extension"],
 		"ignoreUnknown": false
 	},
 	"formatter": {
@@ -14,19 +15,19 @@
 	},
 	"linter": {
 		"enabled": true,
-        "rules": {
-            "recommended": true,
-            "style": {
-                "noNonNullAssertion": "off"
-            },
-            "complexity": {
-                "noUselessTypeConstraint": "error",
-                "noBannedTypes": "off"
-            },
-            "suspicious": {
-                "noTsIgnore": "error"
-            }
-        }
+		"rules": {
+			"recommended": true,
+			"style": {
+				"noNonNullAssertion": "off"
+			},
+			"complexity": {
+				"noUselessTypeConstraint": "error",
+				"noBannedTypes": "off"
+			},
+			"suspicious": {
+				"noTsIgnore": "error"
+			}
+		}
 	},
 	"javascript": {
 		"formatter": {

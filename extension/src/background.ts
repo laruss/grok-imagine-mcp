@@ -33,8 +33,13 @@ function connectWebSocket() {
 			const data = JSON.parse(event.data);
 
 			if (data.type === "requestImage") {
-				console.log("Received requestImage:", data.requestId);
-				captureAndSendImage(data.requestId, data.prompt);
+				console.log(
+					"Received requestImage:",
+					data.requestId,
+					"aspectRatio:",
+					data.aspectRatio || "1:1",
+				);
+				captureAndSendImage(data.requestId, data.prompt, data.aspectRatio);
 			} else {
 				// Forward other messages to popup or content script if needed
 				chrome.runtime.sendMessage({ type: "wsMessage", payload: data });
@@ -57,7 +62,11 @@ function connectWebSocket() {
 	};
 }
 
-async function captureAndSendImage(requestId: string, prompt: string) {
+async function captureAndSendImage(
+	requestId: string,
+	prompt: string,
+	aspectRatio?: string,
+) {
 	let grokTabId: number | undefined;
 
 	try {
@@ -87,6 +96,7 @@ async function captureAndSendImage(requestId: string, prompt: string) {
 			{
 				action: "automateGrokImagine",
 				prompt: prompt,
+				aspectRatio: aspectRatio || "1:1",
 			},
 			3,
 		);

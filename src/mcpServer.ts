@@ -16,16 +16,25 @@ mcpServer.registerTool(
 				.string()
 				.startsWith("/")
 				.describe("Absolute path to the folder where the image will be saved."),
+			// aspectRatio can be one of the following: "3:2", "2:3", "16:9", "9:16", "1:1"
+			aspectRatio: z
+				.enum(["3:2", "2:3", "16:9", "9:16", "1:1"])
+				.default("1:1")
+				.describe("The aspect ratio of the generated image."),
 		},
 	},
-	async ({ prompt, folderPath }) => {
+	async ({ prompt, folderPath, aspectRatio }) => {
 		console.error(
-			`[MCP] Received generate_image request: "${prompt}" -> ${folderPath}`,
+			`[MCP] Received generate_image request: "${prompt}" [${aspectRatio || "1:1"}] -> ${folderPath}`,
 		);
 
 		try {
 			// Request image from Chrome extension via bridge
-			const result = await imageBridge.requestImage(prompt, folderPath);
+			const result = await imageBridge.requestImage(
+				prompt,
+				folderPath,
+				aspectRatio,
+			);
 
 			if (!result.success) {
 				console.error(`[MCP] Image request failed: ${result.error}`);

@@ -5,6 +5,7 @@ interface ImageRequest {
 	requestId: string;
 	prompt: string;
 	folderPath: string;
+	aspectRatio?: string;
 	timestamp: number;
 }
 
@@ -28,6 +29,7 @@ interface PendingRequest {
 	timeout: Timer;
 	prompt: string;
 	folderPath: string;
+	aspectRatio?: string;
 }
 
 class ImageRequestBridge extends EventEmitter {
@@ -73,6 +75,7 @@ class ImageRequestBridge extends EventEmitter {
 			type: "requestImage",
 			requestId: request.requestId,
 			prompt: request.prompt,
+			aspectRatio: request.aspectRatio,
 			timestamp: request.timestamp,
 		});
 
@@ -92,7 +95,11 @@ class ImageRequestBridge extends EventEmitter {
 	 * Request an image from the Chrome extension
 	 * Called by MCP server
 	 */
-	async requestImage(prompt: string, folderPath: string): Promise<ImageResult> {
+	async requestImage(
+		prompt: string,
+		folderPath: string,
+		aspectRatio?: string,
+	): Promise<ImageResult> {
 		// Check if any clients are connected
 		if (!this.hasConnectedClients()) {
 			throw new Error("No WebSocket clients connected");
@@ -119,6 +126,7 @@ class ImageRequestBridge extends EventEmitter {
 				timeout,
 				prompt,
 				folderPath,
+				aspectRatio,
 			});
 
 			// Send request to WebSocket clients
@@ -126,6 +134,7 @@ class ImageRequestBridge extends EventEmitter {
 				requestId,
 				prompt,
 				folderPath,
+				aspectRatio,
 				timestamp,
 			});
 

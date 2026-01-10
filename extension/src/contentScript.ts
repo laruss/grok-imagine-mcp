@@ -2,11 +2,23 @@ import type { SendResponseCallback } from "./types";
 
 console.log("content script loaded");
 
+const SELECTORS = {
+	INPUT: "div[contenteditable]",
+	SUBMIT_BUTTON: "button[type=submit]",
+	IMAGE_CONTAINER: "div[role=listitem]",
+	MODEL_SELECT_TRIGGER: "button#model-select-trigger",
+	ASPECT_RATIO_2_3: "button[aria-label='2:3']",
+	ASPECT_RATIO_3_2: "button[aria-label='3:2']",
+	ASPECT_RATIO_1_1: "button[aria-label='1:1']",
+	ASPECT_RATIO_9_16: "button[aria-label='9:16']",
+	ASPECT_RATIO_16_9: "button[aria-label='16:9']",
+} as const;
+
 // Message handler for both captureImage and automateGrokImagine
 chrome.runtime.onMessage.addListener(
 	(message, _, sendResponse: SendResponseCallback) => {
 		if (message.action === "automateGrokImagine") {
-			handleGrokAutomation(message.prompt)
+			handleGrokAutomation(message.prompt, message.aspectRatio)
 				.then((result) => sendResponse(result))
 				.catch((error) =>
 					sendResponse({
@@ -74,14 +86,13 @@ chrome.runtime.onMessage.addListener(
 // Grok Imagine automation handler
 async function handleGrokAutomation(
 	prompt: string,
+	aspectRatio?: string,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
 	try {
 		debugLog(`[Grok] Starting automation with prompt: ${prompt}`);
 
 		// Phase 1: Find and fill prompt input
-		const inputDiv = document.querySelector(
-			"div[contenteditable]",
-		) as HTMLDivElement;
+		const inputDiv = document.querySelector(SELECTORS.INPUT) as HTMLDivElement;
 		if (!inputDiv) {
 			throw new Error("Element not found: div[contenteditable]");
 		}
@@ -99,9 +110,58 @@ async function handleGrokAutomation(
 		// Wait a bit for UI to react
 		await waitFor(500);
 
-		// Phase 2: Click submit button
+		// Phase 2: Select aspect ratio (if specified)
+		if (aspectRatio && aspectRatio !== "1:1") {
+			debugLog(`[Grok] Setting aspect ratio to: ${aspectRatio}`);
+
+			try {
+				// Click MODEL_SELECT_TRIGGER to open dropdown
+				const modelSelectTrigger = document.querySelector(
+					SELECTORS.MODEL_SELECT_TRIGGER,
+				) as HTMLButtonElement;
+
+				if (!modelSelectTrigger) {
+					debugLog(
+						"[Grok] Warning: Model select trigger not found, skipping aspect ratio selection",
+					);
+				} else {
+					debugLog("[Grok] Clicking model select trigger...");
+					modelSelectTrigger.click();
+
+					// Wait for dropdown to appear
+					await waitFor(300);
+
+					// Click the appropriate aspect ratio button
+					const aspectRatioSelector = getAspectRatioSelector(aspectRatio);
+					const aspectRatioButton = document.querySelector(
+						aspectRatioSelector,
+					) as HTMLButtonElement;
+
+					if (!aspectRatioButton) {
+						debugLog(
+							`[Grok] Warning: Aspect ratio button not found for ${aspectRatio}, continuing with default`,
+						);
+					} else {
+						debugLog(`[Grok] Clicking aspect ratio button: ${aspectRatio}`);
+						aspectRatioButton.click();
+
+						// Wait for dropdown to close and UI to update
+						await waitFor(300);
+						debugLog("[Grok] Aspect ratio selected successfully");
+					}
+				}
+			} catch (error) {
+				debugLog(
+					`[Grok] Error setting aspect ratio: ${error}, continuing with default`,
+				);
+			}
+		} else {
+			debugLog("[Grok] Using default aspect ratio (1:1)");
+		}
+
+		// Phase 3: Click submit button
 		const submitButton = document.querySelector(
-			"button[type=submit]",
+			SELECTORS.SUBMIT_BUTTON,
 		) as HTMLButtonElement;
 		if (!submitButton) {
 			throw new Error("Element not found: button[type=submit]");
@@ -110,7 +170,7 @@ async function handleGrokAutomation(
 		debugLog("[Grok] Clicking submit button...");
 		submitButton.click();
 
-		// Phase 3: Wait for image generation (30 second timeout)
+		// Phase 4: Wait for image generation (30 second timeout)
 		const startTime = Date.now();
 		const TIMEOUT = 30000; // 30 seconds
 		const POLL_INTERVAL = 5000; // 5 seconds
@@ -131,7 +191,7 @@ async function handleGrokAutomation(
 			}
 
 			// Check all list items
-			const containers = document.querySelectorAll("div[role=listitem]");
+			const containers = document.querySelectorAll(SELECTORS.IMAGE_CONTAINER);
 
 			debugLog(
 				`[Grok] Poll attempt ${pollAttempt} (${elapsed}s elapsed): Found ${containers.length} containers`,
@@ -235,4 +295,25 @@ function blobToBase64(blob: Blob): Promise<string> {
 		reader.onerror = reject;
 		reader.readAsDataURL(blob);
 	});
+}
+
+// Helper function to get the correct selector for aspect ratio
+function getAspectRatioSelector(aspectRatio: string): string {
+	switch (aspectRatio) {
+		case "2:3":
+			return SELECTORS.ASPECT_RATIO_2_3;
+		case "3:2":
+			return SELECTORS.ASPECT_RATIO_3_2;
+		case "1:1":
+			return SELECTORS.ASPECT_RATIO_1_1;
+		case "9:16":
+			return SELECTORS.ASPECT_RATIO_9_16;
+		case "16:9":
+			return SELECTORS.ASPECT_RATIO_16_9;
+		default:
+			debugLog(
+				`[Grok] Unknown aspect ratio: ${aspectRatio}, defaulting to 1:1`,
+			);
+			return SELECTORS.ASPECT_RATIO_1_1;
+	}
 }

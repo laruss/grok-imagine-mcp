@@ -11,8 +11,41 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 
 import type { ContentScriptResponseType } from "src/types.ts";
 
+// Alarm configuration
+const KEEPALIVE_ALARM_NAME = "websocket-keepalive";
+const KEEPALIVE_INTERVAL_MINUTES = 0.25; // 15 seconds
+
 let ws: WebSocket | null = null;
 let wsStatus: "connected" | "disconnected" | "connecting" = "disconnected";
+
+// Start keepalive alarm when WebSocket connects
+function startKeepalive() {
+	chrome.alarms.create(KEEPALIVE_ALARM_NAME, {
+		periodInMinutes: KEEPALIVE_INTERVAL_MINUTES,
+	});
+	console.log("[Keepalive] Alarm started");
+}
+
+// Stop keepalive alarm when WebSocket disconnects
+function stopKeepalive() {
+	chrome.alarms.clear(KEEPALIVE_ALARM_NAME);
+	console.log("[Keepalive] Alarm stopped");
+}
+
+// Handle keepalive alarm events
+chrome.alarms.onAlarm.addListener((alarm) => {
+	if (alarm.name === KEEPALIVE_ALARM_NAME) {
+		console.log("[Keepalive] Alarm triggered - checking WebSocket health");
+
+		// Check if WebSocket is still connected
+		if (!ws || ws.readyState !== WebSocket.OPEN) {
+			console.log("[Keepalive] WebSocket not connected, attempting reconnect");
+			connectWebSocket();
+		} else {
+			console.log("[Keepalive] WebSocket is healthy");
+		}
+	}
+});
 
 function connectWebSocket() {
 	if (ws && ws.readyState === WebSocket.OPEN) return;
@@ -23,6 +56,7 @@ function connectWebSocket() {
 	ws.onopen = () => {
 		console.log("WebSocket connected");
 		wsStatus = "connected";
+		startKeepalive();
 	};
 
 	ws.onmessage = (event) => {
@@ -52,6 +86,7 @@ function connectWebSocket() {
 	ws.onclose = (event) => {
 		console.log("WebSocket closed:", event.reason);
 		wsStatus = "disconnected";
+		stopKeepalive();
 		// Reconnect logic if needed
 		setTimeout(connectWebSocket, 5000);
 	};
@@ -59,6 +94,7 @@ function connectWebSocket() {
 	ws.onerror = (error) => {
 		console.error("WebSocket error:", error);
 		wsStatus = "disconnected";
+		stopKeepalive();
 	};
 }
 
@@ -75,7 +111,7 @@ async function captureAndSendImage(
 		// Create new tab with Grok Imagine
 		const tab = await chrome.tabs.create({
 			url: "https://grok.com/imagine",
-			active: false, // Don't focus the tab
+			active: true, // Focus the tab to avoid throttling
 		});
 
 		grokTabId = tab.id;
@@ -220,5 +256,6 @@ connectWebSocket();
 
 // Optional: Clean up on unload
 chrome.runtime.onSuspend.addListener(() => {
+	stopKeepalive();
 	ws?.close();
 });

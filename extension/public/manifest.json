@@ -22,11 +22,11 @@
         "http://localhost:3000",
         "https://grok.com/*"
     ],
-    "permissions": ["tabs", "scripting", "activeTab"],
+    "permissions": ["tabs", "scripting", "activeTab", "alarms"],
     "content_scripts": [
         {
             "matches": [
-                "<all_urls>"
+                "https://grok.com/*"
             ],
             "js": [
                 "contentScript.js"

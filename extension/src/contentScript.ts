@@ -334,7 +334,7 @@ async function handleGrokAutomation(
 
 		// Phase 4: Wait for image generation (30 second timeout)
 		const startTime = Date.now();
-		const TIMEOUT = 30000; // 30 seconds
+		const TIMEOUT = 60000; // 30 seconds
 		const POLL_INTERVAL = 5000; // 5 seconds
 		const MIN_IMAGE_SIZE = 150000; // Minimum base64 string length for generated image
 		let pollAttempt = 0;

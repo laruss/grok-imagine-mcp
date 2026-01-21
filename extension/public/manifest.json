@@ -1,7 +1,7 @@
 {
     "name": "grok imagine mcp connector",
     "description": "A Chrome extension to connect Grok Imagine with Model Context Protocol (MCP).",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "manifest_version": 3,
     "icons": {
         "16": "icons/16.png",
@@ -22,7 +22,7 @@
         "http://localhost:3000",
         "https://grok.com/*"
     ],
-    "permissions": ["tabs", "scripting", "activeTab", "alarms"],
+    "permissions": ["tabs", "scripting", "activeTab", "alarms", "storage"],
     "content_scripts": [
         {
             "matches": [

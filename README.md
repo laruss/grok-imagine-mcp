@@ -1,20 +1,23 @@
 # Grok Image Generation MCP Server
 
-An MCP (Model Context Protocol) server that generates images using Grok's Imagine feature through a Chrome extension bridge. This allows AI assistants like Claude to generate images by automating the Grok Imagine interface.
+An MCP (Model Context Protocol) server that generates images using Grok's Imagine feature through a Chrome extension
+bridge. This allows AI assistants like Claude to generate images by automating the Grok Imagine interface.
 
 ## Architecture
 
 This project consists of two main components:
 
 ### 1. MCP Server (`src/`)
+
 - **MCP Server**: Exposes a `generate_image` tool via the Model Context Protocol (stdio)
 - **WebSocket Server**: Runs on port 3000 to communicate with the Chrome extension
 - **Image Bridge**: Manages request/response flow between MCP and the extension
-- **Image Storage**: Saves generated images to disk
+- **Image Storage**: Saves generated images to OS temp directory (`{tmpdir}/grok-imagine/`)
 
 ### 2. Chrome Extension (`extension/`)
-- **Background Script**: Connects to the WebSocket server at `ws://localhost:3000`
-- **Content Script**: Automates the Grok Imagine interface
+
+- **Background Script**: Connects to the WebSocket server at `ws://localhost:3000` with keepalive via Chrome alarms
+- **Content Script**: Automates the Grok Imagine interface with localStorage-based aspect ratio control
 - **Popup UI**: Shows connection status and extension information
 - Built with React, TypeScript, and TailwindCSS
 
@@ -35,9 +38,9 @@ Chrome Extension (captures image)
     ↓
 WebSocket Server
     ↓
-MCP Server (saves to disk)
-    ↓
-MCP Client (receives file path)
+MCP Server (saves to temp dir)
+    |
+MCP Client (receives file paths)
 ```
 
 ## Prerequisites
@@ -106,7 +109,9 @@ Add this configuration to your Claude Desktop config file:
   "mcpServers": {
     "grok-imagine": {
       "command": "bun",
-      "args": ["/absolute/path/to/chrome-extension-mcp/build/index.js"]
+      "args": [
+        "/absolute/path/to/chrome-extension-mcp/build/index.js"
+      ]
     }
   }
 }
@@ -119,16 +124,25 @@ Replace `/absolute/path/to/chrome-extension-mcp` with the actual path to this pr
 Once configured, you can ask Claude to generate images:
 
 ```
-Generate an image of a sunset over mountains and save it to /Users/username/Pictures
+Generate an image of a sunset over mountains
 ```
 
+The `generate_image` tool supports the following parameters:
+
+- `prompt` (required): Text description of the image to generate
+- `aspectRatio` (optional): One of `"1:1"`, `"3:2"`, `"2:3"`, `"16:9"`, `"9:16"` (default: `"1:1"`)
+- `imageCount` (optional): Number of images to generate, `"1"` to `"4"` (default: `"1"`)
+
 Claude will use the `generate_image` tool, which will:
+
 1. Send a request to the Chrome extension via WebSocket
 2. The extension opens grok.com/imagine in a new tab
-3. Automates entering the prompt and generating the image
-4. Captures the generated image as base64
-5. Closes the tab and sends the image back
-6. The MCP server saves the image to the specified folder
+3. Sets the correct aspect ratio (reloads page if needed)
+4. Automates entering the prompt and generating the image(s)
+5. Captures the generated image(s) as base64
+6. Closes the tab and sends the images back
+7. The MCP server saves images to the OS temp directory (`{tmpdir}/grok-imagine/`)
+8. Returns the file paths to the MCP client
 
 ## Development
 
@@ -141,15 +155,17 @@ chrome-extension-mcp/
 │   ├── mcpServer.ts              # MCP server with generate_image tool
 │   ├── webServer.ts              # WebSocket server (port 3000)
 │   ├── imageRequestBridge.ts     # Request/response management
-│   └── imageStorage.ts           # Image saving logic
+│   └── imageStorage.ts           # Image saving logic (saves to temp dir)
 ├── extension/                    # Chrome Extension
 │   ├── src/
-│   │   ├── background.ts         # Background script (WebSocket client)
+│   │   ├── background.ts         # Background script (WebSocket client with keepalive)
 │   │   ├── contentScript.ts      # Grok automation script
+│   │   ├── types.ts              # Type definitions
+│   │   ├── utils.ts              # Utility functions
 │   │   ├── popup/                # Popup UI (React)
 │   │   └── options/              # Options page (React)
-│   ├── public/                   # Extension assets
-│   ├── config/                   # Extension manifest
+│   ├── public/                   # Extension assets (manifest, HTML, icons)
+│   ├── config/                   # Build scripts
 │   └── build/                    # Built extension (load this in Chrome)
 ├── build/                        # Built MCP server
 ├── package.json                  # MCP server dependencies
@@ -191,7 +207,8 @@ You can configure the MCP server behavior using environment variables:
 
 ### Extension Settings
 
-The Chrome extension connects to `ws://localhost:3000` by default. If you need to change this, modify `extension/src/background.ts`.
+The Chrome extension connects to `ws://localhost:3000` by default. If you need to change this, modify
+`extension/src/background.ts`.
 
 ## Troubleshooting
 
@@ -232,6 +249,7 @@ This project is licensed under the MIT License - see the [extension/license](ext
 ## Contributing
 
 Contributions are welcome! Please ensure your code:
+
 - Passes all linting and type checking (`bun run fix`)
 - Follows the existing code style
 - Includes appropriate error handling

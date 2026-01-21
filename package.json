@@ -9,7 +9,7 @@
 	"scripts": {
 		"dev": "bun --hot src/index.ts",
 		"lint": "bunx biome lint",
-		"build": "bun build src/index.ts --bundle --minify --outdir=build",
+		"build": "bun build src/index.ts --bundle --minify --target=bun --outdir=build",
 		"format": "bunx biome format",
 		"check": "bunx biome check",
 		"typecheck": "tsc --noEmit",

@@ -11,12 +11,18 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 
 import type { ContentScriptResponseType } from "src/types.ts";
 
+// Storage key for pending request (must match contentScript.ts)
+const PENDING_REQUEST_KEY = "grokImaginePendingRequest";
+// Storage key for tracking requestId during page reloads
+const PENDING_REQUEST_ID_KEY = "grokImaginePendingRequestId";
+
 // Alarm configuration
 const KEEPALIVE_ALARM_NAME = "websocket-keepalive";
 const KEEPALIVE_INTERVAL_MINUTES = 0.25; // 15 seconds
 
 let ws: WebSocket | null = null;
 let wsStatus: "connected" | "disconnected" | "connecting" = "disconnected";
+let currentGrokTabId: number | undefined; // Track the current Grok tab for cleanup after page reload
 
 // Start keepalive alarm when WebSocket connects
 function startKeepalive() {
@@ -72,8 +78,15 @@ function connectWebSocket() {
 					data.requestId,
 					"aspectRatio:",
 					data.aspectRatio || "1:1",
+					"imageCount:",
+					data.imageCount || 1,
 				);
-				captureAndSendImage(data.requestId, data.prompt, data.aspectRatio);
+				captureAndSendImage(
+					data.requestId,
+					data.prompt,
+					data.aspectRatio,
+					data.imageCount,
+				);
 			} else {
 				// Forward other messages to popup or content script if needed
 				chrome.runtime.sendMessage({ type: "wsMessage", payload: data });
@@ -102,11 +115,18 @@ async function captureAndSendImage(
 	requestId: string,
 	prompt: string,
 	aspectRatio?: string,
+	imageCount?: number,
 ) {
 	let grokTabId: number | undefined;
 
 	try {
 		console.log(`[Grok] Starting automation for: "${prompt}"`);
+
+		// Store the requestId and tabId in case we need to handle a page reload
+		// This happens when aspect ratio needs to be changed via localStorage
+		await chrome.storage.local.set({
+			[PENDING_REQUEST_ID_KEY]: { requestId, timestamp: Date.now() },
+		});
 
 		// Create new tab with Grok Imagine
 		const tab = await chrome.tabs.create({
@@ -115,6 +135,7 @@ async function captureAndSendImage(
 		});
 
 		grokTabId = tab.id;
+		currentGrokTabId = grokTabId; // Store for later cleanup
 
 		if (!grokTabId) {
 			throw new Error("Failed to create Grok tab");
@@ -133,30 +154,60 @@ async function captureAndSendImage(
 				action: "automateGrokImagine",
 				prompt: prompt,
 				aspectRatio: aspectRatio || "1:1",
+				imageCount: imageCount || 1,
 			},
 			3,
 		);
+
+		// If we get here, the response was immediate (no page reload needed)
+		// Clean up the pending request ID
+		await chrome.storage.local.remove(PENDING_REQUEST_ID_KEY);
+		currentGrokTabId = undefined;
 
 		// Close the tab
 		await chrome.tabs.remove(grokTabId);
 
 		// Send response back to server
-		if (response?.success && response.imageUrl) {
+		if (
+			response?.success &&
+			response.imageUrls &&
+			response.imageUrls.length > 0
+		) {
 			ws?.send(
 				JSON.stringify({
 					type: "imageResponse",
 					requestId,
 					success: true,
-					imageData: response.imageUrl,
+					imageData: response.imageUrls,
 				}),
 			);
-			console.log(`[Grok] Success for request: ${requestId}`);
+			console.log(
+				`[Grok] Success for request: ${requestId}, collected ${response.imageUrls.length} image(s)`,
+			);
 		} else {
 			throw new Error(response?.error || "Unknown error from content script");
 		}
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
+
+		// Check if this is the "message channel closed" error from a page reload
+		// In this case, the content script will resume and send results via pendingRequestComplete
+		if (
+			errorMessage.includes("message channel closed") ||
+			errorMessage.includes("A listener indicated an asynchronous response")
+		) {
+			console.log(
+				`[Grok] Page reload detected for request ${requestId}, waiting for content script to resume...`,
+			);
+			// Don't send error response - wait for pendingRequestComplete message
+			return;
+		}
+
 		console.error(`[Grok] Error: ${errorMessage}`);
+
+		// Clean up stored state
+		await chrome.storage.local.remove(PENDING_REQUEST_ID_KEY);
+		currentGrokTabId = undefined;
 
 		// Try to close tab if it's still open
 		if (grokTabId) {
@@ -248,8 +299,87 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 		sendResponse({ status: wsStatus });
 	}
 
+	// Handle results from content script after page reload (aspect ratio change)
+	if (message.type === "pendingRequestComplete") {
+		handlePendingRequestComplete(message.result, sender.tab?.id);
+	}
+
 	return true; // Keep channel open for async responses
 });
+
+// Handle the completion of a pending request after page reload
+async function handlePendingRequestComplete(
+	result: { success: boolean; imageUrls?: string[]; error?: string },
+	tabId?: number,
+) {
+	try {
+		// Get the stored requestId
+		const stored = await chrome.storage.local.get(PENDING_REQUEST_ID_KEY);
+		const pendingData = stored[PENDING_REQUEST_ID_KEY] as
+			| { requestId: string; timestamp: number }
+			| undefined;
+
+		if (!pendingData) {
+			console.error("[Grok] No pending requestId found for completed request");
+			return;
+		}
+
+		const { requestId, timestamp } = pendingData;
+
+		// Check if request is still valid (within 120 seconds - give extra time for generation)
+		const age = Date.now() - timestamp;
+		if (age > 120000) {
+			console.error(
+				`[Grok] Pending request ${requestId} expired (age: ${age}ms)`,
+			);
+			await chrome.storage.local.remove(PENDING_REQUEST_ID_KEY);
+			return;
+		}
+
+		console.log(
+			`[Grok] Received pendingRequestComplete for request ${requestId}`,
+		);
+
+		// Clean up stored state
+		await chrome.storage.local.remove(PENDING_REQUEST_ID_KEY);
+
+		// Close the tab
+		const tabToClose = tabId || currentGrokTabId;
+		if (tabToClose) {
+			try {
+				await chrome.tabs.remove(tabToClose);
+			} catch {}
+		}
+		currentGrokTabId = undefined;
+
+		// Send response back to server via WebSocket
+		if (result.success && result.imageUrls && result.imageUrls.length > 0) {
+			ws?.send(
+				JSON.stringify({
+					type: "imageResponse",
+					requestId,
+					success: true,
+					imageData: result.imageUrls,
+				}),
+			);
+			console.log(
+				`[Grok] Success for request: ${requestId}, collected ${result.imageUrls.length} image(s) (after page reload)`,
+			);
+		} else {
+			ws?.send(
+				JSON.stringify({
+					type: "imageResponse",
+					requestId,
+					success: false,
+					error: result.error || "Unknown error from content script",
+				}),
+			);
+			console.error(`[Grok] Error for request ${requestId}: ${result.error}`);
+		}
+	} catch (error) {
+		console.error(`[Grok] Error handling pendingRequestComplete: ${error}`);
+	}
+}
 
 // Call on extension load or event
 connectWebSocket();

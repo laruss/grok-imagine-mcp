@@ -1,6 +1,6 @@
 export type ContentScriptResponseType = {
 	success: boolean;
-	imageUrl?: string;
+	imageUrls?: string[];
 	error?: string;
 };
 

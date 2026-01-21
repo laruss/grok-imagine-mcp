@@ -12,29 +12,26 @@ mcpServer.registerTool(
 		description: "Generates an image based on a text prompt.",
 		inputSchema: {
 			prompt: z.string().describe("The text prompt for the image generation."),
-			folderPath: z
-				.string()
-				.startsWith("/")
-				.describe("Absolute path to the folder where the image will be saved."),
 			// aspectRatio can be one of the following: "3:2", "2:3", "16:9", "9:16", "1:1"
 			aspectRatio: z
 				.enum(["3:2", "2:3", "16:9", "9:16", "1:1"])
 				.default("1:1")
 				.describe("The aspect ratio of the generated image."),
+			imageCount: z
+				.enum(["1", "2", "3", "4"])
+				.default("1")
+				.describe("The number of images to generate (1-4)."),
 		},
 	},
-	async ({ prompt, folderPath, aspectRatio }) => {
+	async ({ prompt, aspectRatio, imageCount }) => {
+		const count = Number.parseInt(imageCount || "1", 10);
 		console.error(
-			`[MCP] Received generate_image request: "${prompt}" [${aspectRatio || "1:1"}] -> ${folderPath}`,
+			`[MCP] Received generate_image request: "${prompt}" [${aspectRatio || "1:1"}] x${count}`,
 		);
 
 		try {
 			// Request image from Chrome extension via bridge
-			const result = await imageBridge.requestImage(
-				prompt,
-				folderPath,
-				aspectRatio,
-			);
+			const result = await imageBridge.requestImage(prompt, aspectRatio, count);
 
 			if (!result.success) {
 				console.error(`[MCP] Image request failed: ${result.error}`);
@@ -49,21 +46,27 @@ mcpServer.registerTool(
 				};
 			}
 
-			// Save image to disk
-			const filePaths = await saveImage({
-				base64DataUrl: result.imageData!,
-				folderPath,
-				prompt,
-			});
+			// Save all images to disk
+			const allFilePaths: string[] = [];
+			const images = result.imageData!;
+			for (let i = 0; i < images.length; i++) {
+				const imageDataUrl = images[i]!;
+				const filePaths = await saveImage({
+					base64DataUrl: imageDataUrl,
+					prompt,
+					index: images.length > 1 ? i + 1 : undefined,
+				});
+				allFilePaths.push(...filePaths);
+			}
 
 			console.error(
-				`[MCP] Image saved successfully to ${filePaths.length} locations`,
+				`[MCP] ${images.length} image(s) saved successfully to ${allFilePaths.length} location(s)`,
 			);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Image saved to:\n${filePaths.map((p) => `- ${p}`).join("\n")}`,
+						text: `${images.length} image(s) saved to:\n${allFilePaths.map((p) => `- ${p}`).join("\n")}`,
 					},
 				],
 			};

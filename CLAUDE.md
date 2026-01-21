@@ -4,11 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Chrome Extension MCP (Model Context Protocol) server that enables AI assistants to generate images using Grok's Imagine feature. The system bridges MCP stdio communication with a Chrome extension via WebSocket.
+This is a Chrome Extension MCP (Model Context Protocol) server that enables AI assistants to generate images using
+Grok's Imagine feature. The system bridges MCP stdio communication with a Chrome extension via WebSocket.
 
 ## Architecture
 
 Multi-tier communication flow:
+
 ```
 MCP Client (Claude Desktop)
   ↕ stdio
@@ -23,12 +25,16 @@ grok.com/imagine
 
 **Key Components:**
 
-1. **MCP Server** (`src/mcpServer.ts`): Exposes `generate_image` tool via stdio, accepts prompt + folderPath + aspectRatio
+1. **MCP Server** (`src/mcpServer.ts`): Exposes `generate_image` tool via stdio, accepts prompt + aspectRatio +
+   imageCount
 2. **WebSocket Server** (`src/webServer.ts`): Runs on port 3000 using Bun's native WebSocket support
-3. **Image Request Bridge** (`src/imageRequestBridge.ts`): UUID-based request/response coordination with EventEmitter pattern, 60s timeout
-4. **Image Storage** (`src/imageStorage.ts`): Saves base64 images to disk, sanitizes filenames from prompts
-5. **Chrome Extension Background** (`extension/src/background.ts`): WebSocket client, orchestrates tab automation with retry logic
-6. **Chrome Extension Content Script** (`extension/src/contentScript.ts`): DOM automation on grok.com/imagine with polling
+3. **Image Request Bridge** (`src/imageRequestBridge.ts`): UUID-based request/response coordination with EventEmitter
+   pattern, 60s timeout
+4. **Image Storage** (`src/imageStorage.ts`): Saves base64 images to OS temp directory (`{tmpdir}/grok-imagine/`)
+5. **Chrome Extension Background** (`extension/src/background.ts`): WebSocket client with keepalive via Chrome alarms,
+   orchestrates tab automation with retry logic
+6. **Chrome Extension Content Script** (`extension/src/contentScript.ts`): DOM automation on grok.com/imagine with
+   polling, localStorage-based aspect ratio control
 
 ## Commands
 
@@ -41,6 +47,7 @@ bun run fix          # Lint, format, and typecheck (use before commits)
 ```
 
 To run the built server:
+
 ```bash
 bun run build/index.js
 ```
@@ -65,8 +72,10 @@ After building, load `extension/build/` as an unpacked extension in Chrome.
    bun install              # Root for MCP server
    cd extension && bun install  # For extension
    ```
-3. **Extension rebuild required**: After changing extension code, run `bun run build` in `extension/` and reload the extension in Chrome
-4. **MCP server restart required**: After changing MCP server code, restart the server (or use `bun run dev` for hot reload)
+3. **Extension rebuild required**: After changing extension code, run `bun run build` in `extension/` and reload the
+   extension in Chrome
+4. **MCP server restart required**: After changing MCP server code, restart the server (or use `bun run dev` for hot
+   reload)
 
 ## Bun-Specific Patterns
 
@@ -82,6 +91,7 @@ Do NOT use: `express`, `ws`, `better-sqlite3`, `ioredis`, `pg`, `dotenv`
 ## Extension Build System
 
 Custom build script at `extension/config/build.ts`:
+
 - Bundles TypeScript/React to browser JS
 - Processes CSS with PostCSS + Tailwind
 - Copies HTML from `public/` to `build/`
@@ -90,11 +100,13 @@ Custom build script at `extension/config/build.ts`:
 ## Code Quality
 
 **BiomeJS** handles both linting and formatting (replaces ESLint + Prettier):
+
 - Separate configs for root and extension/
 - Tab indentation, double quotes
 - Always run `bun run fix` before commits
 
 **Lefthook Git Hooks** (extension only):
+
 - Pre-commit: Auto-formats staged files with Biome
 - Pre-push: Runs full build to catch errors
 
@@ -103,25 +115,33 @@ Custom build script at `extension/config/build.ts`:
 1. **Request/Response Flow**: UUID-based tracking with Promise + timeout, cleanup on completion/error
 2. **Error Propagation**: Multi-layer logging with prefixes ([MCP], [WebSocket], [Bridge], [Grok])
 3. **Retry Mechanisms**:
-   - WebSocket auto-reconnect (5s delay)
-   - Content script initialization retry (3 attempts, 1s delay)
-   - Image polling (30s timeout, 5s intervals)
-4. **Dual Save**: Images saved to both project root (testing) and user-specified folder
+    - WebSocket auto-reconnect (5s delay) with Chrome alarms-based keepalive (15s intervals)
+    - Content script initialization retry (3 attempts, 1s delay)
+    - Image polling (60s timeout, 5s intervals)
+4. **Aspect Ratio Control**: Manipulates Grok's `useImagineModeStore` in localStorage, triggers page reload if change
+   needed, resumes automation after reload
+5. **Pending Request Handling**: Content script state persisted in chrome.storage to survive page reloads during aspect
+   ratio changes
+6. **Image Detection**: Uses MIN_IMAGE_SIZE threshold (150KB) to detect when generated images are ready vs placeholders
 
 ## Configuration
 
 **Environment Variables** (optional):
+
 - `IMAGE_REQUEST_TIMEOUT`: Override 60s default for image generation
 
 **Claude Desktop Integration**:
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or
+`%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
 {
   "mcpServers": {
     "grok-imagine": {
       "command": "bun",
-      "args": ["/absolute/path/to/chrome-extension-mcp/build/index.js"]
+      "args": [
+        "/absolute/path/to/chrome-extension-mcp/build/index.js"
+      ]
     }
   }
 }
@@ -136,6 +156,5 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 ## Known Limitations
 
-- Aspect ratio parameter defined in MCP but not wired to content script
-- Content script injected globally (`<all_urls>`), could be optimized to grok.com only
-- No state persistence across extension restarts
+- No state persistence across extension restarts (pending requests are lost)
+- Requires page reload for aspect ratio changes (adds ~2-3s latency)

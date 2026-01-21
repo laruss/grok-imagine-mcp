@@ -1,10 +1,11 @@
 import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 interface SaveImageOptions {
 	base64DataUrl: string;
-	folderPath: string;
 	prompt: string;
+	index?: number; // Optional index for multiple images (1, 2, 3, etc.)
 }
 
 /**
@@ -70,60 +71,37 @@ async function ensureDirectory(dirPath: string): Promise<void> {
 
 /**
  * Save image from base64 data URL to filesystem
- * Saves to both project root (for testing) and specified folder
+ * Saves to system temp directory under grok-imagine/
  * Returns array of file paths where image was saved
  */
 export async function saveImage(options: SaveImageOptions): Promise<string[]> {
-	const { base64DataUrl, folderPath, prompt } = options;
-
-	// Validate folder path is absolute
-	if (!folderPath.startsWith("/")) {
-		throw new Error(`Folder path must be absolute: ${folderPath}`);
-	}
+	const { base64DataUrl, prompt, index } = options;
 
 	// Parse data URL to extract format and binary data
 	const { format, data } = parseDataUrl(base64DataUrl);
 
-	// Generate filename
+	// Generate filename with optional index suffix
 	const sanitizedPrompt = sanitizeFilename(prompt) || "image";
 	const timestamp = Date.now();
-	const filename = `${sanitizedPrompt}_${timestamp}.${format}`;
+	const indexSuffix = index !== undefined ? `_${index}` : "";
+	const filename = `${sanitizedPrompt}_${timestamp}${indexSuffix}.${format}`;
 
-	// Prepare save locations
-	const projectRoot = process.cwd();
-	const rootPath = join(projectRoot, filename);
-	const userPath = join(folderPath, filename);
+	// Prepare save location in system temp directory
+	const tempDir = join(tmpdir(), "grok-imagine");
+	const tempPath = join(tempDir, filename);
 
-	const savedPaths: string[] = [];
+	// Ensure grok-imagine directory exists
+	await ensureDirectory(tempDir);
 
-	// Save to project root (for testing)
+	// Save to temp directory
 	try {
-		await Bun.write(rootPath, data);
-		savedPaths.push(rootPath);
-		console.error(`[Storage] Saved image to project root: ${rootPath}`);
+		await Bun.write(tempPath, data);
+		console.error(`[Storage] Saved image to temp: ${tempPath}`);
 	} catch (error) {
-		throw new Error(`Failed to save image to project root: ${error}`);
+		throw new Error(`Failed to save image to temp directory: ${error}`);
 	}
 
-	// Save to user-specified folder
-	try {
-		// Ensure directory exists
-		await ensureDirectory(dirname(userPath));
-
-		await Bun.write(userPath, data);
-		savedPaths.push(userPath);
-		console.error(`[Storage] Saved image to user folder: ${userPath}`);
-	} catch (error) {
-		// If saving to user folder fails, we still have the root copy
-		// Log error but don't throw
-		console.error(`[Storage] Failed to save to user folder: ${error}`);
-		// Still throw to indicate partial failure
-		throw new Error(
-			`Saved to project root but failed to save to ${folderPath}: ${error}`,
-		);
-	}
-
-	return savedPaths;
+	return [tempPath];
 }
 
 /**

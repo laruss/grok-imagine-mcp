@@ -4,8 +4,8 @@ import type { ServerWebSocket } from "bun";
 interface ImageRequest {
 	requestId: string;
 	prompt: string;
-	folderPath: string;
 	aspectRatio?: string;
+	imageCount?: number;
 	timestamp: number;
 }
 
@@ -13,13 +13,13 @@ interface ImageResponse {
 	type: "imageResponse";
 	requestId: string;
 	success: boolean;
-	imageData?: string;
+	imageData?: string[];
 	error?: string;
 }
 
 interface ImageResult {
 	success: boolean;
-	imageData?: string;
+	imageData?: string[];
 	error?: string;
 }
 
@@ -28,8 +28,8 @@ interface PendingRequest {
 	reject: (error: Error) => void;
 	timeout: Timer;
 	prompt: string;
-	folderPath: string;
 	aspectRatio?: string;
+	imageCount?: number;
 }
 
 class ImageRequestBridge extends EventEmitter {
@@ -76,6 +76,7 @@ class ImageRequestBridge extends EventEmitter {
 			requestId: request.requestId,
 			prompt: request.prompt,
 			aspectRatio: request.aspectRatio,
+			imageCount: request.imageCount,
 			timestamp: request.timestamp,
 		});
 
@@ -97,8 +98,8 @@ class ImageRequestBridge extends EventEmitter {
 	 */
 	async requestImage(
 		prompt: string,
-		folderPath: string,
 		aspectRatio?: string,
+		imageCount?: number,
 	): Promise<ImageResult> {
 		// Check if any clients are connected
 		if (!this.hasConnectedClients()) {
@@ -125,21 +126,21 @@ class ImageRequestBridge extends EventEmitter {
 				reject,
 				timeout,
 				prompt,
-				folderPath,
 				aspectRatio,
+				imageCount,
 			});
 
 			// Send request to WebSocket clients
 			this.sendImageRequest({
 				requestId,
 				prompt,
-				folderPath,
 				aspectRatio,
+				imageCount,
 				timestamp,
 			});
 
 			console.error(
-				`[Bridge] Image request created: ${requestId} (prompt: "${prompt}")`,
+				`[Bridge] Image request created: ${requestId} (prompt: "${prompt}", imageCount: ${imageCount || 1})`,
 			);
 		});
 	}
@@ -149,8 +150,9 @@ class ImageRequestBridge extends EventEmitter {
 	 * Called by WebSocket server
 	 */
 	handleImageResponse(response: ImageResponse): void {
+		const imageCount = response.imageData?.length || 0;
 		console.error(
-			`[Bridge] Received image response: ${response.requestId} (success: ${response.success})`,
+			`[Bridge] Received image response: ${response.requestId} (success: ${response.success}, images: ${imageCount})`,
 		);
 
 		const pending = this.pendingRequests.get(response.requestId);
@@ -169,7 +171,11 @@ class ImageRequestBridge extends EventEmitter {
 		this.pendingRequests.delete(response.requestId);
 
 		// Resolve or reject the promise
-		if (response.success && response.imageData) {
+		if (
+			response.success &&
+			response.imageData &&
+			response.imageData.length > 0
+		) {
 			pending.resolve({
 				success: true,
 				imageData: response.imageData,

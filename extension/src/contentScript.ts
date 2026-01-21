@@ -21,6 +21,7 @@ interface ImagineModeStore {
 interface PendingRequest {
 	prompt: string;
 	aspectRatio?: string;
+	imageCount?: number;
 	timestamp: number;
 }
 
@@ -28,7 +29,11 @@ interface PendingRequest {
 chrome.runtime.onMessage.addListener(
 	(message, _, sendResponse: SendResponseCallback) => {
 		if (message.action === "automateGrokImagine") {
-			handleGrokAutomationRequest(message.prompt, message.aspectRatio)
+			handleGrokAutomationRequest(
+				message.prompt,
+				message.aspectRatio,
+				message.imageCount,
+			)
 				.then((result) => sendResponse(result))
 				.catch((error) =>
 					sendResponse({
@@ -68,7 +73,7 @@ chrome.runtime.onMessage.addListener(
 						const base64DataUrl = reader.result as string;
 						sendResponse({
 							success: true,
-							imageUrl: base64DataUrl, // e.g., "data:image/png;base64,..."
+							imageUrls: [base64DataUrl], // e.g., ["data:image/png;base64,..."]
 						});
 					};
 					reader.onerror = () => {
@@ -97,9 +102,10 @@ chrome.runtime.onMessage.addListener(
 async function handleGrokAutomationRequest(
 	prompt: string,
 	aspectRatio?: string,
-): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+	imageCount?: number,
+): Promise<{ success: boolean; imageUrls?: string[]; error?: string }> {
 	debugLog(
-		`[Grok] Received automation request with aspect ratio: ${aspectRatio || "default"}`,
+		`[Grok] Received automation request with aspect ratio: ${aspectRatio || "default"}, imageCount: ${imageCount || 1}`,
 	);
 
 	// Check if we need to set aspect ratio via localStorage
@@ -147,7 +153,7 @@ async function handleGrokAutomationRequest(
 			);
 
 			// Save the pending request to chrome.storage before reload
-			await savePendingRequest(prompt, aspectRatio);
+			await savePendingRequest(prompt, aspectRatio, imageCount);
 
 			// Reload the page - the content script will resume after reload
 			location.reload();
@@ -163,7 +169,7 @@ async function handleGrokAutomationRequest(
 	}
 
 	// Aspect ratio is already correct or not specified, proceed directly
-	return handleGrokAutomation(prompt, aspectRatio);
+	return handleGrokAutomation(prompt, aspectRatio, imageCount);
 }
 
 // Get current aspect ratio from localStorage
@@ -216,10 +222,12 @@ function setAspectRatioInLocalStorage(aspectRatio: [number, number]): boolean {
 async function savePendingRequest(
 	prompt: string,
 	aspectRatio?: string,
+	imageCount?: number,
 ): Promise<void> {
 	const pendingRequest: PendingRequest = {
 		prompt,
 		aspectRatio,
+		imageCount,
 		timestamp: Date.now(),
 	};
 
@@ -261,6 +269,7 @@ async function checkAndResumePendingRequest(): Promise<void> {
 		const result2 = await handleGrokAutomation(
 			pendingRequest.prompt,
 			pendingRequest.aspectRatio,
+			pendingRequest.imageCount,
 		);
 
 		// Send result back to background script
@@ -292,9 +301,13 @@ checkAndResumePendingRequest();
 async function handleGrokAutomation(
 	prompt: string,
 	aspectRatio?: string,
-): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+	imageCount?: number,
+): Promise<{ success: boolean; imageUrls?: string[]; error?: string }> {
+	const targetCount = imageCount || 1;
 	try {
-		debugLog(`[Grok] Starting automation with prompt: ${prompt}`);
+		debugLog(
+			`[Grok] Starting automation with prompt: ${prompt}, target images: ${targetCount}`,
+		);
 
 		// Phase 1: Find and fill prompt input
 		const inputDiv = document.querySelector(SELECTORS.INPUT) as HTMLDivElement;
@@ -332,20 +345,21 @@ async function handleGrokAutomation(
 		debugLog("[Grok] Clicking submit button...");
 		submitButton.click();
 
-		// Phase 4: Wait for image generation (30 second timeout)
+		// Phase 4: Wait for image generation (60 second timeout)
 		const startTime = Date.now();
-		const TIMEOUT = 60000; // 30 seconds
-		const POLL_INTERVAL = 5000; // 5 seconds
-		const MIN_IMAGE_SIZE = 150000; // Minimum base64 string length for generated image
+		const TIMEOUT = 60_000; // 60 seconds
+		const POLL_INTERVAL = 5_000; // 5 seconds
+		const MIN_IMAGE_SIZE = 150_000; // Minimum base64 string length for generated image
 		let pollAttempt = 0;
+		const collectedImages: string[] = [];
 
 		debugLog(
-			"[Grok] Waiting for image generation (30s timeout, checking every 5s)...",
+			`[Grok] Waiting for ${targetCount} image(s) (60s timeout, checking every 5s)...`,
 		);
 
 		while (Date.now() - startTime < TIMEOUT) {
 			pollAttempt++;
-			const elapsed = Math.round((Date.now() - startTime) / 1000);
+			const elapsed = Math.round((Date.now() - startTime) / 1_000);
 
 			// Wait 5 seconds before checking (except on first attempt)
 			if (pollAttempt > 1) {
@@ -356,7 +370,7 @@ async function handleGrokAutomation(
 			const containers = document.querySelectorAll(SELECTORS.IMAGE_CONTAINER);
 
 			debugLog(
-				`[Grok] Poll attempt ${pollAttempt} (${elapsed}s elapsed): Found ${containers.length} containers`,
+				`[Grok] Poll attempt ${pollAttempt} (${elapsed}s elapsed): Found ${containers.length} containers, collected ${collectedImages.length}/${targetCount} images`,
 			);
 
 			if (containers.length === 0) {
@@ -375,43 +389,45 @@ async function handleGrokAutomation(
 				}
 
 				const srcLength = img.src.length;
-				debugLog(
-					`[Grok]   Container ${i + 1}: Image src length = ${srcLength} chars`,
-				);
 
 				// Check if image src is long enough to be a generated image
 				if (srcLength >= MIN_IMAGE_SIZE) {
-					debugLog(
-						`[Grok] ✓ Found generated image in container ${i + 1}! (${srcLength} chars)`,
-					);
+					// Extract base64 data
+					let base64Data: string | null = null;
 
-					// Image src should already be base64
 					if (img.src.startsWith("data:image/")) {
-						debugLog("[Grok] Image is base64, returning directly");
-						return {
-							success: true,
-							imageUrl: img.src,
-						};
+						base64Data = img.src;
+					} else {
+						// Fetch and convert to base64
+						try {
+							const response = await fetch(img.src);
+							const blob = await response.blob();
+							base64Data = await blobToBase64(blob);
+						} catch (fetchError) {
+							debugLog(
+								`[Grok]   Container ${i + 1}: Failed to fetch image: ${fetchError}`,
+							);
+							continue;
+						}
 					}
 
-					// Otherwise fetch and convert
-					debugLog("[Grok] Fetching and converting image to base64...");
-					try {
-						const response = await fetch(img.src);
-						const blob = await response.blob();
-						const base64 = await blobToBase64(blob);
+					// Check if we already have this image (avoid duplicates)
+					if (base64Data && !collectedImages.includes(base64Data)) {
+						collectedImages.push(base64Data);
+						debugLog(
+							`[Grok] Collected image ${collectedImages.length}/${targetCount} from container ${i + 1} (${srcLength} chars)`,
+						);
 
-						debugLog(
-							`[Grok] ✓ Conversion complete! Image size: ${Math.round(blob.size / 1024)}KB`,
-						);
-						return {
-							success: true,
-							imageUrl: base64,
-						};
-					} catch (fetchError) {
-						debugLog(
-							`[Grok] Failed to fetch image: ${fetchError}, trying next container...`,
-						);
+						// Check if we have enough images
+						if (collectedImages.length >= targetCount) {
+							debugLog(
+								`[Grok] All ${targetCount} images collected successfully!`,
+							);
+							return {
+								success: true,
+								imageUrls: collectedImages,
+							};
+						}
 					}
 				} else {
 					debugLog(
@@ -420,12 +436,24 @@ async function handleGrokAutomation(
 				}
 			}
 
-			debugLog("[Grok] No generated images found yet, waiting 5 seconds...");
+			debugLog(
+				`[Grok] Collected ${collectedImages.length}/${targetCount} images, waiting 5 seconds...`,
+			);
 		}
 
-		// Timeout reached
+		// Timeout reached - return what we have (may be partial)
+		if (collectedImages.length > 0) {
+			debugLog(
+				`[Grok] Timeout reached with ${collectedImages.length}/${targetCount} images collected`,
+			);
+			return {
+				success: true,
+				imageUrls: collectedImages,
+			};
+		}
+
 		throw new Error(
-			"Image generation timed out after 30 seconds. Please check Grok service.",
+			"Image generation timed out after 60 seconds. Please check Grok service.",
 		);
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
